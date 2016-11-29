@@ -43,5 +43,6 @@ install(CODE "MESSAGE(STATUS
 \"To enable this plugin, run:
 
  - sysrepoctl --install --yang ${YANG_DIR}/ietf-system.yang
+ - sysrepoctl -m ietf-system -e timezone-name
  - systemctl restart sysrepo-plugind
 \")")
