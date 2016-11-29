@@ -65,15 +65,6 @@ static void get_time_as_string(char (*out)[TIME_BUF_SIZE])
     (*out)[strlen(*out) - 3] = ':';
 }
 
-/*static int endsWith(const char *string, const char *suffix)
-{
-	if (strlen(string) < strlen(suffix))
-	{
-		return false;
-	}
-	return !strcmp(string + strlen(string) - strlen(suffix), suffix);
-}*/
-
 static int clock_dp_cb(const char* xpath, sr_val_t** values, size_t* values_cnt, void* private_ctx)
 {
     char buf[TIME_BUF_SIZE];
