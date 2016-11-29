@@ -16,40 +16,35 @@
 //   Set datetime RPC
 //   Restart and shutdown RPCs (done)
 
-static void
-retrieve_current_config(sr_session_ctx_t* session)
+int hostname_cb(sr_session_ctx_t *session, const char *xpath, sr_notif_event_t event, void *private_ctx)
 {
+    if (event == SR_EV_ABORT) {
+        return SR_ERR_OK;
+    }
+
     sr_val_t* value = NULL;
     int rc = SR_ERR_OK;
-
     const char* hostname;
-
     rc = sr_get_item(session, "/ietf-system:system/hostname", &value);
     if (SR_ERR_NOT_FOUND == rc) {
         hostname = "default";
     } else if (SR_ERR_OK != rc) {
         syslog(LOG_DEBUG, "error by retrieving configuration: %s", sr_strerror(rc));
-        return;
+        return rc;
     } else {
         assert(value->type == SR_STRING_T);
         hostname = value->data.string_val;
     }
 
-    syslog(LOG_DEBUG, "Setting hostname to %s\n", hostname);
-    sethostname(hostname, strlen(hostname));
-
-    if (SR_ERR_OK != rc) {
-        sr_free_val(value);
+    if (event == SR_EV_VERIFY) {
+        // TODO: do we want some syntax validation?
+    } else {
+        syslog(LOG_DEBUG, "Setting hostname to %s\n", hostname);
+        // TODO: take a systemd detour for persistency?
+        sethostname(hostname, strlen(hostname));
     }
-}
 
-static int
-module_change_cb(sr_session_ctx_t* session, const char* module_name, sr_notif_event_t event, void* private_ctx)
-{
-    syslog(LOG_DEBUG, "configuration has changed. Event=%s", event == SR_EV_APPLY ? "apply" : event == SR_EV_VERIFY ? "verify" : "unknown");
-
-    retrieve_current_config(session);
-
+    sr_free_val(value);
     return SR_ERR_OK;
 }
 
@@ -161,11 +156,10 @@ int sr_plugin_init_cb(sr_session_ctx_t* session, void** private_ctx)
     sr_subscription_ctx_t* subscription = NULL;
     int rc = SR_ERR_OK;
 
-    rc = sr_module_change_subscribe(session, "ietf-system", module_change_cb, NULL, 0,
-        SR_SUBSCR_CTX_REUSE, &subscription);
-    if (SR_ERR_OK != rc) {
+    rc = sr_subtree_change_subscribe(session, "/ietf-system:system/hostname", hostname_cb, NULL, 0,
+                                     SR_SUBSCR_CTX_REUSE | SR_SUBSCR_EV_ENABLED, &subscription);
+    if (SR_ERR_OK != rc)
         goto error;
-    }
 
     get_time_as_string(&boottime);
 
@@ -201,8 +195,6 @@ int sr_plugin_init_cb(sr_session_ctx_t* session, void** private_ctx)
         goto error;
 
     syslog(LOG_DEBUG, "plugin initialized successfully");
-
-    retrieve_current_config(session);
 
     /* set subscription as our private context */
     *private_ctx = subscription;
