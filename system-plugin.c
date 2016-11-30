@@ -266,6 +266,65 @@ cleanup:
     return rc;
 }
 
+int ntp_cb(sr_session_ctx_t *session, const char *xpath, sr_notif_event_t event, void *private_ctx)
+{
+    syslog(LOG_DEBUG, "%s: event %s, xpath %s", __func__, sr_event_to_string(event), xpath);
+    if (event == SR_EV_ABORT) {
+        return SR_ERR_OK;
+    }
+
+    sr_val_t* value = NULL;
+    int rc = SR_ERR_OK;
+    const char *timezone = NULL;
+    rc = sr_get_item(session, "/ietf-system:system/ntp", &value);
+    bool enable_ntp = false;
+    if (SR_ERR_NOT_FOUND == rc) {
+        enable_ntp = false;
+    } else if (SR_ERR_OK != rc) {
+        return rc;
+    } else {
+        sr_free_val(value);
+        rc = sr_get_item(session, "/ietf-system:system/ntp/enabled", &value);
+        if (SR_ERR_NOT_FOUND == rc) {
+            enable_ntp = false;
+        } else if (SR_ERR_OK != rc) {
+            return rc;
+        } else {
+            assert(value->type == SR_BOOL_T);
+            enable_ntp = value->data.bool_val;
+            sr_free_val(value);
+        }
+    }
+
+    if (event == SR_EV_VERIFY) {
+        if (access(TIMEDATECTL_BIN, X_OK)) {
+            syslog(LOG_ERR, TIMEDATECTL_BIN " not available");
+            sr_set_error(session, TIMEDATECTL_BIN " not available", xpath);
+            return SR_ERR_VALIDATION_FAILED;
+        }
+        return SR_ERR_OK;
+    } else {
+        syslog(LOG_DEBUG, enable_ntp ? "Enabling NTP" : "Disabling NTP");
+        char * args[] = {TIMEDATECTL_BIN, "set-ntp", enable_ntp ? "1" : "0", NULL};
+        return exec_wrapper_with_args(args);
+    }
+}
+
+int generic_fail_cb(sr_session_ctx_t *session, const char *xpath, sr_notif_event_t event, void *private_ctx)
+{
+    syslog(LOG_DEBUG, "%s: event %s, xpath %s", __func__, sr_event_to_string(event), xpath);
+    switch (event) {
+    case SR_EV_ABORT:
+        return SR_ERR_OK;
+    case SR_EV_VERIFY:
+        sr_set_error(session, (const char *)private_ctx, xpath);
+        return SR_ERR_VALIDATION_FAILED;
+    case SR_EV_APPLY:
+    case SR_EV_ENABLED:
+        return SR_ERR_INTERNAL;
+    }
+}
+
 int sr_plugin_init_cb(sr_session_ctx_t* session, void** private_ctx)
 {
     sr_subscription_ctx_t* subscription = NULL;
@@ -278,6 +337,18 @@ int sr_plugin_init_cb(sr_session_ctx_t* session, void** private_ctx)
 
     rc = sr_subtree_change_subscribe(session, "/ietf-system:system/clock/timezone-name", timezone_name_cb, NULL, 0,
                                      SR_SUBSCR_CTX_REUSE | SR_SUBSCR_EV_ENABLED, &subscription);
+    if (SR_ERR_OK != rc)
+        goto error;
+
+    rc = sr_subtree_change_subscribe(session, "/ietf-system:system/ntp", ntp_cb, NULL, 0,
+                                     SR_SUBSCR_CTX_REUSE | SR_SUBSCR_EV_ENABLED, &subscription);
+    if (SR_ERR_OK != rc)
+        goto error;
+
+    rc = sr_subtree_change_subscribe(session, "/ietf-system:system/ntp/server", generic_fail_cb,
+                                     "Fine grained NTP configuration is not available. Cannot configure NTP servers.",
+                                     1 /* needs higher priority than /ietf-system:system/ntp */,
+                                     SR_SUBSCR_CTX_REUSE, &subscription);
     if (SR_ERR_OK != rc)
         goto error;
 
