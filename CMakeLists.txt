@@ -42,6 +42,8 @@ install(TARGETS sysrepo-plugin-ietf-system DESTINATION ${SR_PLUGINS_DIR})
 install(CODE "MESSAGE(STATUS
 \"To enable this plugin, run:
 
- - sysrepoctl --install -s ${YANG_DIR} --module ietf-system
+ - sysrepoctl --install --yang ${YANG_DIR}/ietf-system.yang
+ - sysrepoctl -m ietf-system -e timezone-name
+ - sysrepoctl -m ietf-system -e ntp
  - systemctl restart sysrepo-plugind
 \")")
